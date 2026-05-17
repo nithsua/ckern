@@ -7,7 +7,7 @@ start:
     cli
 
     mov rax, framebuffer_request
-    mov rax, [rax + 40]        ; response at offset 40, not 24!
+    mov rax, [rax + 40]        ; response offset
     test rax, rax
     jz .hang
 

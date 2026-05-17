@@ -1,2 +1,2 @@
 CompileFlags:
-  Add: [-std=c++2b, -fmodules, -ffreestanding]
+  Add: [-std=c++2b, -fmodules, -ffreestanding, -Isrc/impl/intf]
