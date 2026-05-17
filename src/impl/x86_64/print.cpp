@@ -1,92 +1,86 @@
 #include "print.h"
-#include <cstddef>
-#include <cstdint>
+#include "font.h"
 
-const static size_t NUM_COLS = 80;
-const static size_t NUM_ROWS = 25;
+namespace {
 
-struct Char {
-  uint8_t character;
-  uint8_t color;
+Framebuffer g_fb{};
+size_t g_col = 0;
+size_t g_row = 0;
+uint32_t g_fg = 0x00FFFFFF;
+uint32_t g_bg = 0x00000000;
 
-  Char(uint8_t character, uint8_t color) : character(character), color(color) {}
+constexpr size_t FONT_W = 8;
+constexpr size_t FONT_H = 16;
 
-  // Add this specific function
-  void operator=(const Char &other) volatile {
-    character = other.character;
-    color = other.color;
-  }
-
-  Char(const volatile Char &other) {
-    character = other.character;
-    color = other.color;
-  }
-};
-
-volatile Char *buffer = reinterpret_cast<volatile Char *>(0xb8000);
-std::size_t col = 0;
-std::size_t row = 0;
-uint8_t color = PRINT_COLOR_WHITE | PRINT_COLOR_BLACK << 4;
-
-void clear_row(size_t row) {
-  Char empty = Char(' ', color);
-
-  for (size_t col = 0; col < NUM_COLS; col++) {
-    buffer[col + (NUM_COLS * row)] = empty;
-  }
+inline uint32_t* pixel_at(size_t x, size_t y) {
+    auto* base = reinterpret_cast<uint8_t*>(g_fb.pixels);
+    auto* row_base = base + y * g_fb.pitch_bytes;
+    return reinterpret_cast<uint32_t*>(row_base) + x;
 }
 
-void print_newline() {
-  col = 0;
-
-  if (row < NUM_ROWS - 1) {
-    row++;
-    return;
-  }
-
-  for (size_t row = 1; row < NUM_ROWS; row++) {
-    for (size_t col = 0; col < NUM_COLS; col++) {
-      Char character = buffer[col + NUM_COLS * row];
-      buffer[col + NUM_COLS * (row - 1)] = character;
-    }
-  }
-
-  clear_row(NUM_COLS - 1);
-}
-
-void print_char(char character) {
-  if (character == '\n') {
-    print_newline();
-    return;
-  }
-
-  if (col > NUM_COLS) {
-    print_newline();
-  }
-
-  buffer[col + (NUM_COLS * row)] = Char(character, color);
-
-  col++;
-}
-
-void print_str(char *str) {
-  for (size_t i = 0; 1; i++) {
-    char character = str[i];
-
-    if (character == '\0') {
-      return;
+void draw_glyph(char c, size_t cell_x, size_t cell_y) {
+    const uint8_t *glyph;
+    if (c >= 0x20 && c < 0x7F) {
+        glyph = font8x16[c - 0x20];
+    } else {
+        glyph = font8x16[0x7F - 0x20];
     }
 
-    print_char(character);
-  }
+    size_t px_x = cell_x * FONT_W;
+    size_t px_y = cell_y * FONT_H;
+
+    for (size_t r = 0; r < FONT_H; r++) {
+        uint8_t bits = glyph[r];
+        for (size_t c2 = 0; c2 < FONT_W; c2++) {
+            bool on = (bits >> (FONT_W - 1 - c2)) & 1;
+            *pixel_at(px_x + c2, px_y + r) = on ? g_fg : g_bg;
+        }
+    }
+}
+
+void advance_row() {
+    g_col = 0;
+    g_row++;
+    if ((g_row + 1) * FONT_H > g_fb.height) {
+        g_row = 0;
+    }
+}
+
+}
+
+void print_init(const Framebuffer& fb) {
+    g_fb = fb;
+    g_col = 0;
+    g_row = 0;
 }
 
 void print_clear() {
-  for (size_t i = 0; i < NUM_ROWS; i++) {
-    clear_row(i);
-  }
+    for (size_t y = 0; y < g_fb.height; y++) {
+        for (size_t x = 0; x < g_fb.width; x++) {
+            *pixel_at(x, y) = g_bg;
+        }
+    }
+    g_col = 0;
+    g_row = 0;
 }
 
-void print_set_color(uint8_t foreground, uint8_t background) {
-    color = foreground + (background << 4);
+void print_char(char c) {
+    if (c == '\n') {
+        advance_row();
+        return;
+    }
+    if ((g_col + 1) * FONT_W > g_fb.width) {
+        advance_row();
+    }
+    draw_glyph(c, g_col, g_row);
+    g_col++;
+}
+
+void print_str(const char *s) {
+    while (*s) print_char(*s++);
+}
+
+void print_set_color(uint32_t fg, uint32_t bg) {
+    g_fg = fg;
+    g_bg = bg;
 }
